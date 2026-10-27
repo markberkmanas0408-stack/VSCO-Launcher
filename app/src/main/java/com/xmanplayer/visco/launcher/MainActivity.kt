@@ -19,6 +19,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.sin
 
 private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
 private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -70,6 +71,7 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.BLACK
         window.navigationBarColor = Color.BLACK
 
+        // Шрифт из assets/pixel.ttf (если файла нет, берём обычный моноширинный)
         pixel = try {
             Typeface.createFromAsset(assets, "pixel.ttf")
         } catch (e: Exception) {
@@ -82,9 +84,13 @@ class MainActivity : Activity() {
             .filter { it.activityInfo.packageName != packageName }
             .sortedBy { it.loadLabel(pm).toString().lowercase() }
 
+        // Нижний слой: чёрный фон и снег. Сверху лежит весь интерфейс.
+        val frame = FrameLayout(this)
+        frame.setBackgroundColor(Color.BLACK)
+        frame.addView(SnowView(this), FrameLayout.LayoutParams(MATCH, MATCH))
+
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.setBackgroundColor(Color.BLACK)
         root.fitsSystemWindows = true
 
         // Верхняя строка: батарея слева, VSCO по центру
@@ -172,12 +178,12 @@ class MainActivity : Activity() {
         root.addView(todayPanel, LinearLayout.LayoutParams(MATCH, WRAP))
         root.addView(line())
 
-        // Список приложений текстом
+        // Список приложений текстом (без иконок, фон прозрачный, чтобы был виден снег)
         list = ListView(this)
         list.divider = null
         list.dividerHeight = 0
         list.overScrollMode = View.OVER_SCROLL_NEVER
-        list.setBackgroundColor(Color.BLACK)
+        list.cacheColorHint = Color.TRANSPARENT
         list.adapter = object : BaseAdapter() {
             override fun getCount() = apps.size
             override fun getItem(p: Int) = apps[p]
@@ -199,7 +205,8 @@ class MainActivity : Activity() {
         }
         root.addView(list, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
-        setContentView(root)
+        frame.addView(root, FrameLayout.LayoutParams(MATCH, MATCH))
+        setContentView(frame)
     }
 
     private fun toggleToday() {
@@ -242,6 +249,61 @@ class MainActivity : Activity() {
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         if (todayPanel.visibility == View.VISIBLE) toggleToday()
+    }
+}
+
+// Снег: мелкие белые точки-пиксели медленно падают. Не принимает касания.
+class SnowView(context: Context) : View(context) {
+
+    private class Dot(
+        var x: Float, var y: Float, val size: Float, val speed: Float,
+        var phase: Float, val sway: Float, val alpha: Int
+    )
+
+    private val dots = ArrayList<Dot>()
+    private val paint = Paint()
+    private val rnd = java.util.Random()
+    private val d = resources.displayMetrics.density
+    private var last = 0L
+
+    init {
+        paint.isAntiAlias = false
+        paint.color = Color.WHITE
+        isClickable = false
+        isFocusable = false
+    }
+
+    private fun newDot(randomY: Boolean): Dot {
+        val size = (1.5f + rnd.nextFloat() * 1.5f) * d      // 1.5-3 dp
+        val speed = (18f + rnd.nextFloat() * 30f) * d       // dp в секунду, медленно
+        val sway = (4f + rnd.nextFloat() * 10f) * d         // лёгкое покачивание
+        val alpha = 90 + rnd.nextInt(110)                   // приглушённая яркость
+        val y = if (randomY) rnd.nextFloat() * height else -size
+        return Dot(rnd.nextFloat() * width, y, size, speed, rnd.nextFloat() * 6.28f, sway, alpha)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        if (width == 0 || height == 0) return
+        while (dots.size < 45) dots.add(newDot(true))
+
+        val now = System.nanoTime()
+        var dt = if (last == 0L) 0f else (now - last) / 1000000000f
+        last = now
+        if (dt > 0.05f) dt = 0.05f
+
+        for (f in dots) {
+            f.y += f.speed * dt
+            f.phase += dt * 0.8f
+            if (f.y > height) {
+                f.y = -f.size
+                f.x = rnd.nextFloat() * width
+            }
+            val x = f.x + sin(f.phase) * f.sway
+            paint.alpha = f.alpha
+            canvas.drawRect(x, f.y, x + f.size, f.y + f.size, paint)
+        }
+        postInvalidateOnAnimation()
     }
 }
 
